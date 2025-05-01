@@ -1,0 +1,25 @@
+[package]
+name = "html-helpers"
+version = "0.0.5"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "A collection of high-level utilities for cleaning, transforming, and converting HTML content."
+keywords = ["html","DOM","parsing"]
+homepage = "https://github.com/jeremychone/rust-html-helpers"
+repository = "https://github.com/jeremychone/rust-html-helpers"
+
+[lib]
+doctest = false # Re-enable if following best practices
+
+[lints.rust]
+unsafe_code = "forbid"
+# unused = { level = "allow", priority = -1 } # For exploratory dev.
+
+[dependencies]
+html5ever = "0.31.0"
+markup5ever = "0.16.1"
+html-escape = "0.2.13"
+# markup5ever_rcdom = "0.3.0" # Often type conflict with markup5server
+tendril = "0.4.3" # needed for custom rcdom
+# -- Others
+derive_more = {version = "2", features = ["from", "display"] }
