@@ -1,5 +1,7 @@
 // region:    --- Modules
 
+mod support;
+
 mod error;
 mod slimmer;
 

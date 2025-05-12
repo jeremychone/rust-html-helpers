@@ -18,8 +18,12 @@ unsafe_code = "forbid"
 [dependencies]
 # -- html5ever
 html5ever = "0.31.0"
-markup5ever_rcdom = "=0.5.3-unofficial"
-# markup5ever = "0.16.1"
+# Note: To maximize compatibility with other libraries
+#       that use html5ever (with different versions),
+#       the single markup5ever_rcdom file is copied into this crate.
+# markup5ever_rcdom = "0.5.3-unofficial"
+markup5ever = "0.16.1"
+tendril = "0.4.3" # needed for custom rcdom
 # -- Other html utils
 html-escape = "0.2.13"
 # -- Others
