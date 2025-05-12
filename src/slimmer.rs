@@ -1,9 +1,9 @@
-use crate::support::rcdom::{Handle, NodeData, RcDom, SerializableHandle};
 use crate::{Error, Result};
 use html5ever::driver::ParseOpts;
 use html5ever::parse_document;
 use html5ever::serialize::SerializeOpts;
 use html5ever::tendril::TendrilSink;
+use markup5ever_rcdom::{Handle, NodeData, RcDom, SerializableHandle};
 
 // region:    --- Constants
 

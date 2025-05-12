@@ -16,10 +16,11 @@ unsafe_code = "forbid"
 # unused = { level = "allow", priority = -1 } # For exploratory dev.
 
 [dependencies]
+# -- html5ever
 html5ever = "0.31.0"
-markup5ever = "0.16.1"
+markup5ever_rcdom = "=0.5.3-unofficial"
+# markup5ever = "0.16.1"
+# -- Other html utils
 html-escape = "0.2.13"
-# markup5ever_rcdom = "0.3.0" # Often type conflict with markup5server
-tendril = "0.4.3" # needed for custom rcdom
 # -- Others
 derive_more = {version = "2", features = ["from", "display"] }
