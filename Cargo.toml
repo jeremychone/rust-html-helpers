@@ -16,14 +16,9 @@ unsafe_code = "forbid"
 # unused = { level = "allow", priority = -1 } # For exploratory dev.
 
 [dependencies]
-# -- html5ever
-html5ever = "0.31.0"
-# Note: To maximize compatibility with other libraries
-#       that use html5ever (with different versions),
-#       the single markup5ever_rcdom file is copied into this crate.
-# markup5ever_rcdom = "0.5.3-unofficial"
-markup5ever = "0.16.1"
-tendril = "0.4.3" # needed for custom rcdom
+# -- Scraper
+scraper = "0.23.1"
+ego-tree = "0.10.0"
 # -- Other html utils
 html-escape = "0.2.13"
 # -- Others
