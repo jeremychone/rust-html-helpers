@@ -3,17 +3,13 @@ use derive_more::{Display, From};
 pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug, Display, From)]
-#[display("{self:?}")]
 pub enum Error {
+	#[display("{_0}")]
 	#[from(String, &String, &str)]
 	Custom(String),
 
-	// -- Externals
-	#[from]
-	Io(std::io::Error), // as example
-	// Note: Consider adding specific errors for HTML parsing/serialization if needed
-	// #[from]
-	// HtmlParseError(html5ever::driver::ParseError), // Example, if you need to expose it
+	#[display("Selector '{selector}' is invalid.\nCause: {cause}")]
+	SelectorParse { selector: String, cause: String },
 }
 
 // region:    --- Custom

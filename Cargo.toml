@@ -21,5 +21,8 @@ scraper = "0.23.1"
 ego-tree = "0.10.0"
 # -- Other html utils
 html-escape = "0.2.13"
+# -- Json
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 # -- Others
 derive_more = {version = "2", features = ["from", "display"] }
