@@ -18,19 +18,17 @@ impl Elem {
 		let attrs = el.value().attrs().map(|(k, v)| (k.to_string(), v.to_string())).collect();
 
 		let full_text = el.text().collect::<String>();
-		let trimmed_text = full_text.trim();
-		let text = if trimmed_text.is_empty() {
+		let text = if full_text.trim().is_empty() {
 			None
 		} else {
-			Some(trimmed_text.to_string())
+			Some(full_text.to_string())
 		};
 
 		let html_content = el.inner_html();
-		let trimmed_html = html_content.trim();
-		let inner_html = if trimmed_html.is_empty() {
+		let inner_html = if html_content.trim().is_empty() {
 			None
 		} else {
-			Some(trimmed_html.to_string())
+			Some(html_content.to_string())
 		};
 
 		Elem {
