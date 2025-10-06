@@ -89,12 +89,20 @@ mod tests {
 		assert_eq!(els_p.len(), 2);
 
 		assert_eq!(els_p[0].tag, "p");
-		assert!(els_p[0].attrs.is_empty());
+		assert!(els_p[0].attrs.is_none());
 		assert_eq!(els_p[0].text.as_deref(), Some("First paragraph."));
 		assert_eq!(els_p[0].inner_html.as_deref(), Some("First paragraph."));
 
 		assert_eq!(els_p[1].tag, "p");
-		assert_eq!(els_p[1].attrs.get("class").map(|s| s.as_str()), Some("highlight"));
+		assert_eq!(
+			els_p[1]
+				.attrs
+				.as_ref()
+				.ok_or("Should have attrs")?
+				.get("class")
+				.map(|s| s.as_str()),
+			Some("highlight")
+		);
 		assert_eq!(els_p[1].text.as_deref(), Some("Second paragraph with span text."));
 		assert_eq!(
 			els_p[1].inner_html.as_deref(),
@@ -170,7 +178,15 @@ mod tests {
 		let els_id = select(html_content, ["#unique"])?;
 		assert_eq!(els_id.len(), 1);
 		assert_eq!(els_id[0].tag, "div");
-		assert_eq!(els_id[0].attrs.get("id").map(|s| s.as_str()), Some("unique"));
+		assert_eq!(
+			els_id[0]
+				.attrs
+				.as_ref()
+				.ok_or("Should have attrs")?
+				.get("id")
+				.map(|s| s.as_str()),
+			Some("unique")
+		);
 		assert_eq!(els_id[0].text.as_deref(), Some("ID Content"));
 
 		// -- Exec & Check - By Class
@@ -280,10 +296,11 @@ mod tests {
 		assert_eq!(snodes.len(), 1);
 		let node = &snodes[0];
 		assert_eq!(node.tag, "a");
-		assert_eq!(node.attrs.len(), 3);
-		assert_eq!(node.attrs.get("href").map(|s| s.as_str()), Some("https://example.com"));
-		assert_eq!(node.attrs.get("title").map(|s| s.as_str()), Some("Test Link"));
-		assert_eq!(node.attrs.get("class").map(|s| s.as_str()), Some("external link"));
+		let attrs = node.attrs.as_ref().ok_or("should have attrs")?;
+		assert_eq!(attrs.len(), 3);
+		assert_eq!(attrs.get("href").map(|s| s.as_str()), Some("https://example.com"));
+		assert_eq!(attrs.get("title").map(|s| s.as_str()), Some("Test Link"));
+		assert_eq!(attrs.get("class").map(|s| s.as_str()), Some("external link"));
 
 		assert_eq!(node.text.as_deref(), Some("Click here"));
 		assert_eq!(node.inner_html.as_deref(), Some("Click <b>here</b>"));
@@ -291,6 +308,7 @@ mod tests {
 		Ok(())
 	}
 
+	// NOTE: Now, the lib does not trim anymore.
 	#[test]
 	fn test_selector_select_text_and_inner_html_trimming_single_selector() -> Result<()> {
 		// -- Setup & Fixtures
@@ -306,20 +324,26 @@ mod tests {
 		// -- Exec & Check - Paragraph text
 		let p_nodes = select(html_content, ["p"])?;
 		assert_eq!(p_nodes.len(), 1);
-		assert_eq!(p_nodes[0].text.as_deref(), Some("Trimmed text here"));
-		assert_eq!(p_nodes[0].inner_html.as_deref(), Some("Trimmed text here"));
+		assert_eq!(p_nodes[0].text.as_deref(), Some("  Trimmed text here  "));
+		assert_eq!(p_nodes[0].inner_html.as_deref(), Some("  Trimmed text here  "));
 
 		// -- Exec & Check - Div with span
 		let div_nodes = select(html_content, ["div"])?;
 		assert_eq!(div_nodes.len(), 1);
-		assert_eq!(div_nodes[0].text.as_deref(), Some("Inner"));
-		assert_eq!(div_nodes[0].inner_html.as_deref(), Some("<span>  Inner  </span>"));
+		assert_eq!(div_nodes[0].text.as_deref(), Some("    Inner    "));
+		assert_eq!(div_nodes[0].inner_html.as_deref(), Some("  <span>  Inner  </span>  "));
 
 		// -- Exec & Check - Pre
 		let pre_nodes = select(html_content, ["pre"])?;
 		assert_eq!(pre_nodes.len(), 1);
-		assert_eq!(pre_nodes[0].text.as_deref(), Some("Untrimmed"));
-		assert_eq!(pre_nodes[0].inner_html.as_deref(), Some("Untrimmed"));
+		assert_eq!(
+			pre_nodes[0].text.as_deref(),
+			Some("            Untrimmed  \n            ")
+		);
+		assert_eq!(
+			pre_nodes[0].inner_html.as_deref(),
+			Some("            Untrimmed  \n            ")
+		);
 
 		// -- Exec & Check - Empty button
 		let button_nodes = select(html_content, ["button"])?;

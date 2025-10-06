@@ -17,7 +17,7 @@ unsafe_code = "forbid"
 
 [dependencies]
 # -- Scraper
-scraper = "0.23.1"
+scraper = "0.24"
 ego-tree = "0.10.0"
 # -- Other html utils
 html-escape = "0.2.13"
