@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	</html>
 	"#;
 
-	let slim = html_helpers::slim_with_indent(fx_html, 2)?;
+    let slim = html_helpers::slim(fx_html, html_helpers::SlimOptions::default().with_indent(2))?;
 
 	println!("Slim (formatted):\n\n{slim}");
 

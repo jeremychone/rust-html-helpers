@@ -9,5 +9,5 @@
 ```rust
 let content: String = /* full HTML page */;
 
-let slim_content = html_helpers::slim_with_indent(&content, 2)?;
+let slim_content = html_helpers::slim(&content, SlimOptions::default().with_indent(2))?;
 ```

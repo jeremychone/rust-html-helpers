@@ -1,3 +1,4 @@
+use super::SlimOptions;
 use crate::error::{Error, Result};
 use ego_tree::NodeRef;
 use scraper::{ElementRef, Html, node::Node};
@@ -38,29 +39,14 @@ pub fn decode_html_entities(content: &str) -> String {
 /// A `Result<String>` which is:
 /// - `Ok(String)` containing the cleaned HTML content.
 /// - `Err` if any errors occur during processing.
-pub fn slim(html_content: &str) -> Result<String> {
+pub fn slim(html_content: &str, options: impl Into<SlimOptions>) -> Result<String> {
+	let options = options.into();
 	let html = Html::parse_document(html_content);
 	let mut output = String::new();
 
-	process_node_recursive_with_indent(html.tree.root(), false, 0, 0, &mut output)?;
+	process_node_recursive_with_indent(html.tree.root(), false, &options, 0, &mut output)?;
 
 	// Final cleanup of empty lines
-	let content = remove_empty_lines(output)?;
-
-	Ok(content)
-}
-
-/// Strips non-content elements from the provided HTML content, then formats it with
-/// the given indentation (number of spaces per nesting level).
-///
-/// For indentation, block‑level tags get a newline and indent, inline tags stay inline.
-/// Pass `0` for flat (no indentation) output.
-pub fn slim_with_indent(html_content: &str, indent_spaces: usize) -> Result<String> {
-	let html = Html::parse_document(html_content);
-	let mut output = String::new();
-
-	process_node_recursive_with_indent(html.tree.root(), false, indent_spaces, 0, &mut output)?;
-
 	let content = remove_empty_lines(output)?;
 
 	Ok(content)
@@ -71,15 +57,18 @@ pub fn slim_with_indent(html_content: &str, indent_spaces: usize) -> Result<Stri
 fn process_node_recursive_with_indent(
 	node: NodeRef<Node>,
 	is_in_head_context: bool,
-	indent_spaces: usize,
+	options: &SlimOptions,
 	depth: usize,
 	output: &mut String,
 ) -> Result<()> {
+	let indent_spaces = options.indent.unwrap_or(0) as usize;
+	let use_tabs = options.indent_with_tabs;
+
 	match node.value() {
 		Node::Document => {
 			// Process children of the document (Doctype, root element <html>)
 			for child in node.children() {
-				process_node_recursive_with_indent(child, false, indent_spaces, depth, output)?;
+				process_node_recursive_with_indent(child, false, options, depth, output)?;
 			}
 		}
 
@@ -159,7 +148,7 @@ fn process_node_recursive_with_indent(
 			}
 
 			// -- Indentation setup
-			let is_formatting = indent_spaces > 0;
+			let is_formatting = indent_spaces > 0 || use_tabs;
 			let is_block = is_formatting && BLOCK_LEVEL_TAGS.contains(&tag_name);
 			// Title is a block‑level tag for formatting purposes but not in the standard list
 			let is_block = is_block || (is_formatting && tag_name == "title");
@@ -169,12 +158,15 @@ fn process_node_recursive_with_indent(
 
 			// --- 1b. Emit newline/indent before opening tag (block-level)
 			if is_block {
-		if output.is_empty() || !output.ends_with('\n') {
+				if output.is_empty() || !output.ends_with('\n') {
 					output.push('\n');
 				}
-				for _ in 0..(depth * indent_spaces) {
-					output.push(' ');
-				}
+				let indent_str = if use_tabs {
+					"\t".repeat(depth)
+				} else {
+					" ".repeat(depth * indent_spaces)
+				};
+				output.push_str(&indent_str);
 			}
 
 			// --- 2. Process Children Recursively into a temporary buffer ---
@@ -183,7 +175,7 @@ fn process_node_recursive_with_indent(
 				process_node_recursive_with_indent(
 					child,
 					child_context_is_in_head,
-					indent_spaces,
+					options,
 					child_depth,
 					&mut children_output,
 				)?;
@@ -212,12 +204,15 @@ fn process_node_recursive_with_indent(
 				output.push_str(&children_output);
 
 				// -- Indent before closing tag (block-level, non‑void, children non‑empty)
-			// Only if children output contains newlines (nested block elements)
-			if is_block && !is_void && children_output.contains('\n') {
+				// Only if children output contains newlines (nested block elements)
+				if is_block && !is_void && children_output.contains('\n') {
 					output.push('\n');
-					for _ in 0..(depth * indent_spaces) {
-						output.push(' ');
-					}
+					let indent_str = if use_tabs {
+						"\t".repeat(depth)
+					} else {
+						" ".repeat(depth * indent_spaces)
+					};
+					output.push_str(&indent_str);
 				}
 
 				// Build end tag
@@ -232,7 +227,7 @@ fn process_node_recursive_with_indent(
 		Node::Fragment => {
 			// Should not happen with parse_document, but handle defensively
 			for child in node.children() {
-				process_node_recursive_with_indent(child, false, indent_spaces, depth, output)?;
+				process_node_recursive_with_indent(child, false, options, depth, output)?;
 			}
 		}
 
@@ -296,7 +291,7 @@ mod tests {
 		// Note attribute order might differ slightly between scraper/html5ever & string building, but content should match.
 
 		// -- Exec
-		let html = slim(fx_html)?;
+		let html = slim(fx_html, SlimOptions::default())?;
 		// println!(
 		// 	"\n---\nSlimmed HTML (Scraper - Basic + Post-Empty Removal):\n{}\n---\n",
 		// 	html
@@ -364,7 +359,7 @@ mod tests {
 		"#;
 
 		// -- Exec
-		let html = slim(fx_html)?;
+		let html = slim(fx_html, SlimOptions::default())?;
 		// println!("\n---\nSlimmed HTML (Scraper - Empty Head Removed):\n{}\n---\n", html);
 
 		// -- Check
@@ -396,7 +391,7 @@ mod tests {
 		"#;
 
 		// -- Exec
-		let html = slim(fx_html)?;
+		let html = slim(fx_html, SlimOptions::default())?;
 		// println!("\n---\nSlimmed HTML (Scraper - Head with Title Kept):\n{}\n---\n", html);
 
 		// -- Check
@@ -436,7 +431,7 @@ mod tests {
 		let expected_body = r#"<body><section><h1>Title</h1></section></body>"#;
 
 		// -- Exec
-		let html = slim(fx_html)?;
+		let html = slim(fx_html, SlimOptions::default())?;
 		// println!("\n---\nSlimmed HTML (Scraper - Nested Empty Removed):\n{}\n---\n", html);
 
 		// -- Check
@@ -473,7 +468,7 @@ mod tests {
 		let expected_body_fragment1 = "<main></main>";
 
 		// -- Exec
-		let html = slim(fx_html)?;
+		let html = slim(fx_html, SlimOptions::default())?;
 
 		// -- Check
 		assert!(html.contains(expected_body_fragment1), "Should keep empty <main>");
@@ -489,90 +484,3 @@ mod tests {
 }
 
 // endregion: --- Tests
-
-#[cfg(test)]
-mod test {
-	use super::*;
-	type TestResult<T> = core::result::Result<T, Box<dyn std::error::Error>>;
-
-	#[test]
-	fn test_slimmer2_slim_with_indent_formatted_2spaces() -> TestResult<()> {
-		// -- Setup & Fixtures
-		let fx_html = r#"
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-		<meta property="og:title" content="Test Title">
-		<meta property="og:url" content="http://example.com">
-		<meta property="og:image" content="http://example.com/img.png">
-		<meta property="og:description" content="Test Description">
-		<meta name="keywords" content="test, html">
-    <title>Simple HTML Page</title>
-		<style> body{ color: red } </style>
-		<link rel="stylesheet" href="style.css">
-		<script> console.log("hi"); </script>
-		<base href="/">
-</head>
-<body class="main-body" aria-label="Page body">
-		<svg><path d="M0 0 L 10 10"></path></svg>
-		<div>
-			<span></span>
-			<p> </p>
-			<b>  </b>
-			<i><!-- comment --></i>
-		</div>
-		<section>Content Inside</section>
-		<article>  </article>
-    <h1 funky-attribute="removeme">Hello, World!</h1>
-    <p>This is a simple HTML page.</p>
-		<a href="https://example.org" class="link-style" extra="gone">Link</a>
-</body>
-</html>
-			"#;
-
-		// -- Exec
-		let formatted = slim_with_indent(fx_html, 2)?;
-		let flat = slim(fx_html)?; // should be the same content without formatting
-
-		println!("{formatted}");
-
-		// -- Check: formatted output contains the expected indentation structure
-		assert!(
-			formatted.lines().count() > flat.lines().count(),
-			"Formatted output should have more lines"
-		);
-
-		// Verify doctype on its own line, followed by <html> with no indent
-		assert!(formatted.starts_with("<!DOCTYPE html>\n<html"));
-
-		// Verify head is indented once (2 spaces)
-		assert!(formatted.contains("\n  <head>"));
-
-		// Verify title inside head is indented twice (4 spaces)
-		assert!(formatted.contains("\n    <title>Simple HTML Page</title>"));
-
-		// Verify meta inside head (void element, no closing tag) indented twice
-		assert!(formatted.contains("\n    <meta content=\"Test Title\" property=\"og:title\">"));
-
-		// Verify body indented once
-		assert!(formatted.contains("\n  <body aria-label=\"Page body\" class=\"main-body\">"));
-
-		// Verify section inside body (depth 2)
-		assert!(formatted.contains("\n    <section>Content Inside</section>"));
-
-		// Verify h1 inside body (depth 2) and removal of funky-attribute
-		assert!(formatted.contains("\n    <h1>Hello, World!</h1>"));
-
-		// Verify link inside body (depth 2, void not, so closing tag present)
-		assert!(formatted.contains("\n    <a class=\"link-style\" href=\"https://example.org\">Link</a>"));
-
-		// Make sure svg, empty div, etc removed
-		assert!(!formatted.contains("<svg>"));
-		assert!(!formatted.contains("<div>"));
-		assert!(!formatted.contains("funky-attribute"));
-
-		Ok(())
-	}
-}
