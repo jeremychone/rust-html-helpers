@@ -44,7 +44,7 @@ pub fn slim(html_content: &str, options: impl Into<SlimOptions>) -> Result<Strin
 	let html = Html::parse_document(html_content);
 	let mut output = String::new();
 
-	process_node_recursive_with_indent(html.tree.root(), false, &options, 0, &mut output)?;
+	process_node_stack_based(html.tree.root(), false, &options, 0, &mut output)?;
 
 	// Final cleanup of empty lines
 	let content = remove_empty_lines(output)?;
@@ -52,10 +52,9 @@ pub fn slim(html_content: &str, options: impl Into<SlimOptions>) -> Result<Strin
 	Ok(content)
 }
 
-/// Recursively processes a node using `scraper`, writing allowed content to the output string,
-/// with optional indentation.
-fn process_node_recursive_with_indent(
-	node: NodeRef<Node>,
+/// Non‑recursive stack‑based version of the slim processing.
+fn process_node_stack_based(
+	root_node: NodeRef<Node>,
 	is_in_head_context: bool,
 	options: &SlimOptions,
 	depth: usize,
@@ -64,175 +63,287 @@ fn process_node_recursive_with_indent(
 	let indent_spaces = options.indent.unwrap_or(0) as usize;
 	let use_tabs = options.indent_with_tabs;
 
-	match node.value() {
-		Node::Document => {
-			// Process children of the document (Doctype, root element <html>)
-			for child in node.children() {
-				process_node_recursive_with_indent(child, false, options, depth, output)?;
-			}
-		}
-
-		Node::Doctype(doctype) => {
-			// Serialize Doctype manually
-			output.push_str("<!DOCTYPE ");
-			output.push_str(&doctype.name);
-			let has_public = !doctype.public_id.is_empty();
-			let has_system = !doctype.system_id.is_empty();
-
-			if has_public {
-				output.push_str(" PUBLIC \"");
-				output.push_str(&doctype.public_id);
-				output.push('"');
-			}
-
-			if has_system {
-				if !has_public {
-					// Add SYSTEM keyword only if no PUBLIC id
-					output.push_str(" SYSTEM");
-				}
-				output.push(' '); // Always add space before system id string if it exists
-				output.push('"');
-				output.push_str(&doctype.system_id);
-				output.push('"');
-			}
-			output.push('>');
-
-			// After doctype, start a new line for formatted output.
-			if indent_spaces > 0 {
-				output.push('\n');
-			}
-		}
-
-		Node::Comment(_) => { /* Skip comments */ }
-
-		Node::Text(text) => {
-			let text_content = text.trim();
-			if !text_content.is_empty() {
-				// Use the raw text provided by scraper, assuming it's decoded.
-				output.push_str(text);
-			}
-		}
-
-		Node::Element(element) => {
-			let tag_name = element.name();
-			let current_node_is_head = tag_name == "head";
-			// Determine context for children: true if current node is <head> or if parent was already in <head>
-			let child_context_is_in_head = is_in_head_context || current_node_is_head;
-
-			let el_ref = ElementRef::wrap(node).ok_or_else(|| Error::custom("Failed to wrap node as ElementRef"))?;
-
-			// --- 1. Decide if this element should be skipped entirely (before processing children) ---
-
-			// Skip tags explicitly marked for removal (outside head context)
-			// Note: script/style/link/base removal handled separately for clarity.
-			if !child_context_is_in_head && TAGS_TO_REMOVE.contains(&tag_name) {
-				return Ok(());
-			}
-			// Skip specific non-content tags always
-			if matches!(tag_name, "script" | "style" | "link" | "base" | "svg") {
-				return Ok(());
-			}
-
-			// Skip elements within <head> context unless they are <title> or allowed <meta>
-			if is_in_head_context {
-				if tag_name == "title" {
-					// Keep title
-				} else if tag_name == "meta" {
-					if !should_keep_meta(el_ref) {
-						return Ok(()); // Remove disallowed meta tag
-					}
-					// Keep allowed meta
-				} else {
-					return Ok(()); // Remove other tags inside head context
-				}
-			}
-
-			// -- Indentation setup
-			let is_formatting = indent_spaces > 0 || use_tabs;
-			let is_block = is_formatting && BLOCK_LEVEL_TAGS.contains(&tag_name);
-			// Title is a block‑level tag for formatting purposes but not in the standard list
-			let is_block = is_block || (is_formatting && tag_name == "title");
-			// For void elements, we must not emit a closing tag (when formatting).
-			let is_void = is_formatting && VOID_ELEMENTS.contains(&tag_name);
-			let child_depth = if is_block { depth + 1 } else { depth };
-
-			// --- 1b. Emit newline/indent before opening tag (block-level)
-			if is_block {
-				if output.is_empty() || !output.ends_with('\n') {
-					output.push('\n');
-				}
-				let indent_str = if use_tabs {
-					"\t".repeat(depth)
-				} else {
-					" ".repeat(depth * indent_spaces)
-				};
-				output.push_str(&indent_str);
-			}
-
-			// --- 2. Process Children Recursively into a temporary buffer ---
-			let mut children_output = String::new();
-			for child in node.children() {
-				process_node_recursive_with_indent(
-					child,
-					child_context_is_in_head,
-					options,
-					child_depth,
-					&mut children_output,
-				)?;
-			}
-
-			// --- 3. Decide whether to keep the current node based on its content *after* processing children ---
-			let is_empty_after_processing = is_string_effectively_empty(&children_output);
-
-			// Check if it's a tag eligible for removal when empty (outside head)
-			let is_removable_tag_when_empty = !child_context_is_in_head && REMOVABLE_EMPTY_TAGS.contains(&tag_name);
-
-			// Check if it's the <head> tag itself and it's now empty
-			let is_empty_head_tag = current_node_is_head && is_empty_after_processing;
-
-			let should_remove_node = (is_removable_tag_when_empty && is_empty_after_processing) || is_empty_head_tag;
-
-			// --- 4. Construct Output if Node is Kept ---
-			if !should_remove_node {
-				// Build start tag
-				output.push('<');
-				output.push_str(tag_name);
-				filter_and_write_attributes(el_ref, child_context_is_in_head, output)?;
-				output.push('>');
-
-				// Append children's content
-				output.push_str(&children_output);
-
-				// -- Indent before closing tag (block-level, non‑void, children non‑empty)
-				// Only if children output contains newlines (nested block elements)
-				if is_block && !is_void && children_output.contains('\n') {
-					output.push('\n');
-					let indent_str = if use_tabs {
-						"\t".repeat(depth)
-					} else {
-						" ".repeat(depth * indent_spaces)
-					};
-					output.push_str(&indent_str);
-				}
-
-				// Build end tag
-				if !is_void {
-					output.push_str("</");
-					output.push_str(tag_name);
-					output.push('>');
-				}
-			}
-		}
-
-		Node::Fragment => {
-			// Should not happen with parse_document, but handle defensively
-			for child in node.children() {
-				process_node_recursive_with_indent(child, false, options, depth, output)?;
-			}
-		}
-
-		Node::ProcessingInstruction(_) => { /* Skip PIs */ }
+	#[derive(Clone)]
+	enum FrameState {
+		Enter,
+		Exit,
 	}
+
+	struct Frame<'a> {
+		node: NodeRef<'a, Node>,
+		is_in_head_context: bool,
+		depth: usize,
+		state: FrameState,
+		children_output: String,
+		/// Where this frame's output should be appended.
+		/// `Some(idx)` means the frame at the given stack index is the parent
+		/// that will collect our output; `None` means append to global output.
+		output_target_index: Option<usize>,
+	}
+
+	let mut stack: Vec<Frame> = Vec::new();
+	stack.push(Frame {
+		node: root_node,
+		is_in_head_context,
+		depth,
+		state: FrameState::Enter,
+		children_output: String::new(),
+		output_target_index: None,
+	});
+
+	while let Some(frame) = stack.pop() {
+		match frame.state {
+			FrameState::Enter => {
+				match frame.node.value() {
+					Node::Document => {
+						// Push children in reverse order (no Exit needed)
+						let children: Vec<_> = frame.node.children().collect();
+						for child in children.into_iter().rev() {
+							stack.push(Frame {
+								node: child,
+								is_in_head_context: false,
+								depth: frame.depth,
+								state: FrameState::Enter,
+								children_output: String::new(),
+								output_target_index: frame.output_target_index,
+							});
+						}
+					}
+					Node::Doctype(doctype) => {
+						// Serialize Doctype
+						let mut s = String::new();
+						s.push_str("<!DOCTYPE ");
+						s.push_str(&doctype.name);
+						let has_public = !doctype.public_id.is_empty();
+						let has_system = !doctype.system_id.is_empty();
+
+						if has_public {
+							s.push_str(" PUBLIC \"");
+							s.push_str(&doctype.public_id);
+							s.push('"');
+						}
+
+						if has_system {
+							if !has_public {
+								s.push_str(" SYSTEM");
+							}
+							s.push(' ');
+							s.push('"');
+							s.push_str(&doctype.system_id);
+							s.push('"');
+						}
+						s.push('>');
+
+						if indent_spaces > 0 {
+							s.push('\n');
+						}
+
+						// Append to parent frame or global output
+						match frame.output_target_index {
+							Some(idx) => {
+								stack
+									.get_mut(idx)
+									.expect("target frame should exist")
+									.children_output
+									.push_str(&s);
+							}
+							None => {
+								output.push_str(&s);
+							}
+						}
+					}
+					Node::Comment(_) => { /* Skip comments */ }
+					Node::Text(text) => {
+						let text_content = text.trim();
+						if !text_content.is_empty() {
+							let s = text.to_string();
+							match frame.output_target_index {
+								Some(idx) => {
+									stack
+										.get_mut(idx)
+										.expect("target frame should exist")
+										.children_output
+										.push_str(&s);
+								}
+								None => {
+									output.push_str(&s);
+								}
+							}
+						}
+					}
+					Node::Element(element) => {
+						let tag_name = element.name();
+
+						// Handle <html> as transparent container: push children directly, no wrapper.
+						if tag_name == "html" {
+							let child_context_is_in_head = frame.is_in_head_context;
+							let mut children: Vec<_> = frame.node.children().collect();
+							children.reverse();
+							for child in children {
+								stack.push(Frame {
+									node: child,
+									is_in_head_context: child_context_is_in_head,
+									depth: frame.depth,
+									state: FrameState::Enter,
+									children_output: String::new(),
+									output_target_index: frame.output_target_index,
+								});
+							}
+							continue;
+						}
+
+						let el_ref = ElementRef::wrap(frame.node)
+							.ok_or_else(|| Error::custom("Failed to wrap node as ElementRef"))?;
+
+						let current_node_is_head = tag_name == "head";
+						let child_context_is_in_head = frame.is_in_head_context || current_node_is_head;
+
+						// Fast-skip rules
+						// Fast-skip rules
+						let should_skip = match tag_name {
+							_ if !child_context_is_in_head && TAGS_TO_REMOVE.contains(&tag_name) => true,
+							"script" | "style" | "link" | "base" | "svg" => true,
+							_ if frame.is_in_head_context => {
+								!(tag_name == "title" || (tag_name == "meta" && should_keep_meta(el_ref)))
+							}
+							_ => false,
+						};
+
+						if should_skip {
+							continue;
+						}
+
+						// Push Exit frame for this element
+						let exit_idx = stack.len();
+						stack.push(Frame {
+							node: frame.node,
+							is_in_head_context: frame.is_in_head_context,
+							depth: frame.depth,
+							state: FrameState::Exit,
+							children_output: String::new(),
+							output_target_index: frame.output_target_index,
+						});
+
+						// Compute child depth and push children in reverse order
+						let is_formatting = indent_spaces > 0 || use_tabs;
+						let is_block = if is_formatting {
+							BLOCK_LEVEL_TAGS.contains(&tag_name) || tag_name == "title"
+						} else {
+							false
+						};
+						let child_depth = if is_block { frame.depth + 1 } else { frame.depth };
+
+						let mut children: Vec<_> = frame.node.children().collect();
+						children.reverse();
+						for child in children {
+							stack.push(Frame {
+								node: child,
+								is_in_head_context: child_context_is_in_head,
+								depth: child_depth,
+								state: FrameState::Enter,
+								children_output: String::new(),
+								output_target_index: Some(exit_idx),
+							});
+						}
+					}
+					Node::Fragment => {
+						let children: Vec<_> = frame.node.children().collect();
+						for child in children.into_iter().rev() {
+							stack.push(Frame {
+								node: child,
+								is_in_head_context: false,
+								depth: frame.depth,
+								state: FrameState::Enter,
+								children_output: String::new(),
+								output_target_index: frame.output_target_index,
+							});
+						}
+					}
+					Node::ProcessingInstruction(_) => { /* Skip PIs */ }
+				}
+			}
+			FrameState::Exit => {
+				let el_ref =
+					ElementRef::wrap(frame.node).ok_or_else(|| Error::custom("Failed to wrap node as ElementRef"))?;
+				let tag_name = el_ref.value().name();
+
+				let is_formatting = indent_spaces > 0 || use_tabs;
+				let is_block = if is_formatting {
+					BLOCK_LEVEL_TAGS.contains(&tag_name) || tag_name == "title"
+				} else {
+					false
+				};
+				let is_void = is_formatting && VOID_ELEMENTS.contains(&tag_name);
+
+				let is_empty_after_processing = is_string_effectively_empty(&frame.children_output);
+				let is_in_head_for_removal = frame.is_in_head_context || tag_name == "head";
+				let is_removable_tag_when_empty = !is_in_head_for_removal && REMOVABLE_EMPTY_TAGS.contains(&tag_name);
+				let is_empty_head_tag = tag_name == "head" && is_empty_after_processing;
+				let should_remove = (is_removable_tag_when_empty && is_empty_after_processing) || is_empty_head_tag;
+
+				if should_remove {
+					continue;
+				}
+
+				let mut out = String::new();
+
+				// Indent before opening tag (block‑level)
+				if is_block {
+					out.push('\n');
+					let indent_str = if use_tabs {
+						"\t".repeat(frame.depth)
+					} else {
+						" ".repeat(frame.depth * indent_spaces)
+					};
+					out.push_str(&indent_str);
+				}
+
+				// Start tag with filtered attributes
+				out.push('<');
+				out.push_str(tag_name);
+				// Attribute filter uses the head‑context of the element itself
+				let is_in_head_for_attrs = frame.is_in_head_context || tag_name == "head";
+				filter_and_write_attributes(el_ref, is_in_head_for_attrs, &mut out)?;
+				out.push('>');
+
+				// Append children output
+				out.push_str(&frame.children_output);
+
+				// Indent before closing tag if needed
+				if is_block && !is_void && frame.children_output.contains('\n') {
+					out.push('\n');
+					let indent_str = if use_tabs {
+						"\t".repeat(frame.depth)
+					} else {
+						" ".repeat(frame.depth * indent_spaces)
+					};
+					out.push_str(&indent_str);
+				}
+
+				// Closing tag unless void
+				if !is_void {
+					out.push_str("</");
+					out.push_str(tag_name);
+					out.push('>');
+				}
+
+				// Append to parent frame or global output
+				match frame.output_target_index {
+					Some(idx) => {
+						stack
+							.get_mut(idx)
+							.expect("target frame should exist")
+							.children_output
+							.push_str(&out);
+					}
+					None => {
+						output.push_str(&out);
+					}
+				}
+			}
+		}
+	}
+
 	Ok(())
 }
 
