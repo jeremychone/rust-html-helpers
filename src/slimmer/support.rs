@@ -9,9 +9,8 @@ pub(super) const TAGS_TO_REMOVE: &[&str] = &["script", "link", "style", "svg", "
 
 /// Tags that should be removed if they become effectively empty (contain only whitespace/comments)
 /// after processing children. Applies only outside the <head> element.
-pub(super) const REMOVABLE_EMPTY_TAGS: &[&str] = &[
-	"div", "span", "p", "i", "b", "em", "strong", "section", "article", "header", "footer", "nav", "aside",
-];
+pub(super) const REMOVABLE_EMPTY_TAGS: &[&str] =
+	&["div", "span", "p", "i", "b", "em", "strong", "section", "article", "header", "footer", "nav", "aside"];
 
 /// Keywords to check within the 'property' attribute of <meta> tags to determine if they should be kept.
 pub(super) const META_PROPERTY_KEYWORDS: &[&str] = &["title", "url", "image", "description"];
@@ -21,6 +20,22 @@ pub(super) const ALLOWED_META_ATTRS: &[&str] = &["property", "content"];
 
 /// Attribute names allowed on elements outside the <head>.
 pub(super) const ALLOWED_BODY_ATTRS: &[&str] = &["class", "aria-label", "href", "title", "id"];
+
+/// Tags considered block-level for indentation purposes (used when indent > 0).
+#[rustfmt::skip]
+pub(super) const BLOCK_LEVEL_TAGS: &[&str] = &[
+	"html", "head", "body", "a", "div", "p", "section", "article", "header", "footer", "nav", "aside",
+	"ul", "ol", "li", "table", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6",
+	"pre", "blockquote", "main", "form", "fieldset", "details", "summary", "figure", "figcaption",
+	"dl", "dt", "dd", "br", "hr", "img", "input", "meta", "link", "script", "style",
+];
+
+/// HTML void elements (should not have closing tags).
+#[rustfmt::skip]
+pub(super) const VOID_ELEMENTS: &[&str] = &[
+	"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+	"param", "source", "track", "wbr",
+];
 
 // endregion: --- Constants
 
@@ -45,7 +60,9 @@ pub(super) fn should_keep_meta(element: ElementRef) -> bool {
 	if let Some(prop_value) = element.value().attr("property") {
 		let value_lower = prop_value.to_lowercase();
 		// Check if the property value contains any of the relevant keywords
-		META_PROPERTY_KEYWORDS.iter().any(|&keyword| value_lower.contains(keyword))
+		META_PROPERTY_KEYWORDS
+			.iter()
+			.any(|&keyword| value_lower.contains(keyword))
 	} else {
 		// No 'property' attribute found
 		false
@@ -53,7 +70,11 @@ pub(super) fn should_keep_meta(element: ElementRef) -> bool {
 }
 
 /// Filters attributes of an element and writes the allowed ones to the output string.
-pub(super) fn filter_and_write_attributes(element: ElementRef, is_in_head_context: bool, output: &mut String) -> Result<()> {
+pub(super) fn filter_and_write_attributes(
+	element: ElementRef,
+	is_in_head_context: bool,
+	output: &mut String,
+) -> Result<()> {
 	let tag_name = element.value().name();
 
 	// Determine the correct list of allowed attributes based on context
