@@ -1,31 +1,15 @@
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 use ego_tree::NodeRef;
-use html_escape::encode_double_quoted_attribute;
 use scraper::{ElementRef, Html, node::Node};
 
-// region:    --- Constants
-
-// NOTE: These constants are duplicated from slimmer.rs. Consider refactoring if they need to be shared.
-
-/// Tags to remove explicitly, regardless of content (unless within <head>).
-const TAGS_TO_REMOVE: &[&str] = &["script", "link", "style", "svg", "base"];
-
-/// Tags that should be removed if they become effectively empty (contain only whitespace/comments)
-/// after processing children. Applies only outside the <head> element.
-const REMOVABLE_EMPTY_TAGS: &[&str] = &[
-	"div", "span", "p", "i", "b", "em", "strong", "section", "article", "header", "footer", "nav", "aside",
-];
-
-/// Keywords to check within the 'property' attribute of <meta> tags to determine if they should be kept.
-const META_PROPERTY_KEYWORDS: &[&str] = &["title", "url", "image", "description"];
-
-/// Attribute names allowed on <meta> tags within the <head>.
-const ALLOWED_META_ATTRS: &[&str] = &["property", "content"];
-
-/// Attribute names allowed on elements outside the <head>.
-const ALLOWED_BODY_ATTRS: &[&str] = &["class", "aria-label", "href", "title", "id"];
-
-// endregion: --- Constants
+use super::support::{
+	filter_and_write_attributes,
+	is_string_effectively_empty,
+	remove_empty_lines,
+	should_keep_meta,
+	TAGS_TO_REMOVE,
+	REMOVABLE_EMPTY_TAGS,
+};
 
 /// Decodes HTML entities (e.g., `&lt;` becomes `<`).
 /// Re-exporting from the original slimmer or using html-escape directly.
@@ -71,17 +55,6 @@ pub fn slim(html_content: &str) -> Result<String> {
 	Ok(content)
 }
 
-/// Removes empty lines from the given content, returning the cleaned string.
-fn remove_empty_lines(content: String) -> Result<String> {
-	let lines: Vec<&str> = content.lines().filter(|line| !line.trim().is_empty()).collect();
-	Ok(lines.join("\n"))
-}
-
-/// Checks if a string contains only whitespace characters.
-fn is_string_effectively_empty(s: &str) -> bool {
-	s.trim().is_empty()
-}
-
 /// Recursively processes a node using `scraper`, writing allowed content to the output string.
 fn process_node_recursive(node: NodeRef<Node>, is_in_head_context: bool, output: &mut String) -> Result<()> {
 	match node.value() {
@@ -116,8 +89,6 @@ fn process_node_recursive(node: NodeRef<Node>, is_in_head_context: bool, output:
 				output.push('"');
 			}
 			output.push('>');
-			// Consider adding a newline if needed for formatting, but remove_empty_lines might handle it.
-			// output.push('\n');
 		}
 
 		Node::Comment(_) => { /* Skip comments */ }
@@ -126,7 +97,6 @@ fn process_node_recursive(node: NodeRef<Node>, is_in_head_context: bool, output:
 			let text_content = text.trim();
 			if !text_content.is_empty() {
 				// Use the raw text provided by scraper, assuming it's decoded.
-				// Re-escaping is generally not needed for text nodes here.
 				output.push_str(text);
 			}
 		}
@@ -209,57 +179,6 @@ fn process_node_recursive(node: NodeRef<Node>, is_in_head_context: bool, output:
 
 		Node::ProcessingInstruction(_) => { /* Skip PIs */ }
 	}
-	Ok(())
-}
-
-// is_effectively_empty (on ElementRef) is no longer needed as we check the string output.
-
-/// Checks if a `<meta>` tag element should be kept based on its `property` attribute.
-fn should_keep_meta(element: ElementRef) -> bool {
-	// Check if the element is actually a <meta> tag
-	if element.value().name() != "meta" {
-		return false;
-	}
-
-	if let Some(prop_value) = element.value().attr("property") {
-		let value_lower = prop_value.to_lowercase();
-		// Check if the property value contains any of the relevant keywords
-		META_PROPERTY_KEYWORDS.iter().any(|&keyword| value_lower.contains(keyword))
-	} else {
-		// No 'property' attribute found
-		false
-	}
-}
-
-/// Filters attributes of an element and writes the allowed ones to the output string.
-fn filter_and_write_attributes(element: ElementRef, is_in_head_context: bool, output: &mut String) -> Result<()> {
-	let tag_name = element.value().name();
-
-	// Determine the correct list of allowed attributes based on context
-	let allowed_attrs: &[&str] = if is_in_head_context {
-		match tag_name {
-			"meta" => ALLOWED_META_ATTRS,
-			"title" => &[], // No attributes allowed on title
-			_ => &[],       // Default deny for other unexpected tags in head
-		}
-	} else {
-		// Outside head context
-		ALLOWED_BODY_ATTRS
-	};
-
-	// Iterate over attributes and append allowed ones
-	for (name, value) in element.value().attrs() {
-		// Check against the determined allowlist
-		if allowed_attrs.contains(&name) {
-			output.push(' ');
-			output.push_str(name);
-			output.push_str("=\"");
-			// Encode attribute value correctly
-			output.push_str(&encode_double_quoted_attribute(value));
-			output.push('"');
-		}
-	}
-
 	Ok(())
 }
 
@@ -493,15 +412,9 @@ mod tests {
 		</html>
 		"#;
 		let expected_body_fragment1 = "<main></main>";
-		// Note: scraper often adds <tbody> implicitly, but the empty tags should still be present.
-		// let expected_body_fragment_table = "<table><tbody><tr><td></td></tr></tbody></table>"; // Assuming tbody insertion
 
 		// -- Exec
 		let html = slim(fx_html)?;
-		// println!(
-		// 	"\n---\nSlimmed HTML (Scraper - Keep Non-Removable Empty):\n{}\n---\n",
-		// 	html
-		// );
 
 		// -- Check
 		assert!(html.contains(expected_body_fragment1), "Should keep empty <main>");
@@ -511,8 +424,6 @@ mod tests {
 			"Should keep empty table structure. Got: {}",
 			html
 		);
-		// If tbody is reliably inserted by the parser version used:
-		// assert!(html.contains(expected_body_fragment_table), "Should keep empty table structure with tbody. Got: {}", html);
 
 		Ok(())
 	}
