@@ -1,9 +1,9 @@
 [package]
 name = "html-helpers"
-version = "0.2.1-WIP"
+version = "0.2.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-description = "A collection of high-level utilities for cleaning, transforming, and converting HTML content."
+description = "DEPRECATED: This crate has been renamed to htmlr. Please use htmlr instead."
 keywords = ["html","DOM","parsing"]
 homepage = "https://github.com/jeremychone/rust-html-helpers"
 repository = "https://github.com/jeremychone/rust-html-helpers"

@@ -1,13 +1,7 @@
-# html-helpers
+# html-helpers (renamed to htmlr)
 
-**A collection of high-level utilities for cleaning, transforming, and converting HTML content.**
+This crate has been renamed to [htmlr](https://crates.io/crates/htmlr).
 
-> ⚠️ Very early release – currently supports only HTML slimming.
+`html-helpers v0.2.2` corresponds to `htmlr v0.1.0`.
 
-## Example
-
-```rust
-let content: String = /* full HTML page */;
-
-let slim_content = html_helpers::slim(&content, SlimOptions::default().with_indent(2))?;
-```
+All future development will continue in `htmlr`.
